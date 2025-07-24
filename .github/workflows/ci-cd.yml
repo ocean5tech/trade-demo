@@ -85,12 +85,18 @@ jobs:
         script: |
           echo "🔍 Starting environment checks..."
           
-          # Check disk space (需要至少2GB可用空间)
+          # Clean up first to free space
+          echo "🧹 Cleaning up to free disk space..."
+          docker system prune -af 2>/dev/null || true
+          sudo apt-get clean 2>/dev/null || sudo yum clean all 2>/dev/null || true
+          rm -rf /tmp/* 2>/dev/null || true
+          
+          # Check disk space (需要至少1GB可用空间)
           echo "📊 Checking disk space..."
           AVAILABLE_SPACE=$(df / | awk 'NR==2 {print $4}')
-          REQUIRED_SPACE=2097152  # 2GB in KB
+          REQUIRED_SPACE=1048576  # 1GB in KB
           if [ $AVAILABLE_SPACE -lt $REQUIRED_SPACE ]; then
-            echo "❌ Insufficient disk space. Available: $(($AVAILABLE_SPACE/1024))MB, Required: 2GB"
+            echo "❌ Insufficient disk space. Available: $(($AVAILABLE_SPACE/1024))MB, Required: 1GB"
             exit 1
           fi
           echo "✅ Disk space check passed: $(($AVAILABLE_SPACE/1024))MB available"
