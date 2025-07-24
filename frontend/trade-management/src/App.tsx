@@ -31,6 +31,16 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>('');
   const [selectedView, setSelectedView] = useState<'dashboard' | 'documents' | 'compliance'>('dashboard');
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [editingDocument, setEditingDocument] = useState<TradeDocument | null>(null);
+  const [formData, setFormData] = useState<Partial<TradeDocument>>({
+    documentType: '',
+    country: '',
+    status: 'Draft',
+    companyName: '',
+    value: 0,
+    riskLevel: 'Low'
+  });
 
   // 数据获取逻辑
   useEffect(() => {
@@ -115,6 +125,128 @@ const App: React.FC = () => {
 
     fetchData();
   }, []);
+
+  // CRUD 操作函数
+  const createDocument = async (newDocument: Partial<TradeDocument>) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/tradedocuments`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(newDocument),
+      });
+
+      if (!response.ok) {
+        throw new Error(`创建失败: ${response.status}`);
+      }
+
+      const createdDocument = await response.json();
+      setDocuments(prev => [createdDocument, ...prev]);
+      setShowCreateForm(false);
+      resetForm();
+      console.log('✅ 文档创建成功:', createdDocument);
+    } catch (error) {
+      console.error('❌ 创建文档失败:', error);
+      setError(error instanceof Error ? error.message : '创建文档失败');
+    }
+  };
+
+  const updateDocument = async (id: number, updatedDocument: Partial<TradeDocument>) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/tradedocuments/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ ...updatedDocument, id }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`更新失败: ${response.status}`);
+      }
+
+      setDocuments(prev => prev.map(doc => 
+        doc.id === id ? { ...doc, ...updatedDocument } : doc
+      ));
+      setEditingDocument(null);
+      resetForm();
+      console.log('✅ 文档更新成功');
+    } catch (error) {
+      console.error('❌ 更新文档失败:', error);
+      setError(error instanceof Error ? error.message : '更新文档失败');
+    }
+  };
+
+  const deleteDocument = async (id: number) => {
+    if (!window.confirm('确定要删除这个文档吗？此操作不可撤销。')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/tradedocuments/${id}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        throw new Error(`删除失败: ${response.status}`);
+      }
+
+      setDocuments(prev => prev.filter(doc => doc.id !== id));
+      console.log('✅ 文档删除成功');
+    } catch (error) {
+      console.error('❌ 删除文档失败:', error);
+      setError(error instanceof Error ? error.message : '删除文档失败');
+    }
+  };
+
+  // 表单处理函数
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: name === 'value' ? parseFloat(value) || 0 : value
+    }));
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (editingDocument) {
+      await updateDocument(editingDocument.id, formData);
+    } else {
+      await createDocument(formData);
+    }
+  };
+
+  const startEdit = (document: TradeDocument) => {
+    setEditingDocument(document);
+    setFormData({
+      documentType: document.documentType,
+      country: document.country,
+      status: document.status,
+      companyName: document.companyName,
+      value: document.value,
+      riskLevel: document.riskLevel
+    });
+    setShowCreateForm(true);
+  };
+
+  const resetForm = () => {
+    setFormData({
+      documentType: '',
+      country: '',
+      status: 'Draft',
+      companyName: '',
+      value: 0,
+      riskLevel: 'Low'
+    });
+    setEditingDocument(null);
+  };
+
+  const cancelForm = () => {
+    setShowCreateForm(false);
+    resetForm();
+  };
 
   // 统计计算
   const stats = {
@@ -261,7 +393,120 @@ const App: React.FC = () => {
 
         {selectedView === 'documents' && (
           <section className="documents-section">
-            <h2>📄 贸易文档管理</h2>
+            <div className="section-header">
+              <h2>📄 贸易文档管理</h2>
+              <button 
+                className="btn btn-primary"
+                onClick={() => setShowCreateForm(true)}
+              >
+                ➕ 新建文档
+              </button>
+            </div>
+
+            {showCreateForm && (
+              <div className="modal-overlay">
+                <div className="modal">
+                  <div className="modal-header">
+                    <h3>{editingDocument ? '编辑文档' : '创建新文档'}</h3>
+                    <button className="close-btn" onClick={cancelForm}>✖️</button>
+                  </div>
+                  <form onSubmit={handleSubmit} className="document-form">
+                    <div className="form-row">
+                      <div className="form-group">
+                        <label>文档类型</label>
+                        <select
+                          name="documentType"
+                          value={formData.documentType}
+                          onChange={handleInputChange}
+                          required
+                        >
+                          <option value="">选择文档类型</option>
+                          <option value="Export License">出口许可证</option>
+                          <option value="Import Permit">进口许可证</option>
+                          <option value="Certificate of Origin">原产地证书</option>
+                          <option value="Customs Declaration">海关申报单</option>
+                        </select>
+                      </div>
+                      <div className="form-group">
+                        <label>国家</label>
+                        <input
+                          type="text"
+                          name="country"
+                          value={formData.country}
+                          onChange={handleInputChange}
+                          placeholder="输入国家名称"
+                          required
+                        />
+                      </div>
+                    </div>
+                    <div className="form-row">
+                      <div className="form-group">
+                        <label>公司名称</label>
+                        <input
+                          type="text"
+                          name="companyName"
+                          value={formData.companyName}
+                          onChange={handleInputChange}
+                          placeholder="输入公司名称"
+                          required
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label>价值 (USD)</label>
+                        <input
+                          type="number"
+                          name="value"
+                          value={formData.value}
+                          onChange={handleInputChange}
+                          placeholder="0"
+                          min="0"
+                          step="0.01"
+                          required
+                        />
+                      </div>
+                    </div>
+                    <div className="form-row">
+                      <div className="form-group">
+                        <label>状态</label>
+                        <select
+                          name="status"
+                          value={formData.status}
+                          onChange={handleInputChange}
+                          required
+                        >
+                          <option value="Draft">草稿</option>
+                          <option value="Pending">待审批</option>
+                          <option value="Approved">已批准</option>
+                          <option value="Rejected">已拒绝</option>
+                        </select>
+                      </div>
+                      <div className="form-group">
+                        <label>风险等级</label>
+                        <select
+                          name="riskLevel"
+                          value={formData.riskLevel}
+                          onChange={handleInputChange}
+                          required
+                        >
+                          <option value="Low">低风险</option>
+                          <option value="Medium">中风险</option>
+                          <option value="High">高风险</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="form-actions">
+                      <button type="button" className="btn btn-secondary" onClick={cancelForm}>
+                        取消
+                      </button>
+                      <button type="submit" className="btn btn-primary">
+                        {editingDocument ? '更新文档' : '创建文档'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
+
             <div className="documents-grid">
               {documents.map(doc => (
                 <div key={doc.id} className={`document-card status-${doc.status.toLowerCase()}`}>
@@ -287,8 +532,18 @@ const App: React.FC = () => {
                     <p><strong>创建:</strong> {new Date(doc.createdDate).toLocaleDateString()}</p>
                   </div>
                   <div className="document-actions">
-                    <button className="btn btn-primary">查看详情</button>
-                    <button className="btn btn-secondary">编辑</button>
+                    <button 
+                      className="btn btn-primary"
+                      onClick={() => startEdit(doc)}
+                    >
+                      ✏️ 编辑
+                    </button>
+                    <button 
+                      className="btn btn-danger"
+                      onClick={() => deleteDocument(doc.id)}
+                    >
+                      🗑️ 删除
+                    </button>
                   </div>
                 </div>
               ))}
