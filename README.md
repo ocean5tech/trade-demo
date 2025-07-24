@@ -52,15 +52,36 @@ AspNetIdentity Tables
 
 ## 🚀 快速开始
 
-### 环境要求
-- .NET 8.0 SDK
-- Node.js 18+ & npm
-- PostgreSQL 15+
-- Git
+### 🛠️ 本地开发 (推荐工作流程)
 
-### 1. 克隆项目
 ```bash
-git clone https://github.com/your-username/trade-demo.git
+# 1. 启动本地开发环境 (一键启动)
+./scripts/local-test.sh
+
+# 2. 访问应用进行开发和测试
+# 前端: http://localhost:3000
+# 后端: http://localhost:5000  
+# Swagger: http://localhost:5000/swagger
+
+# 3. 测试功能确认无误后提交
+git add .
+git commit -m "✨ 功能描述"
+git push origin main  # 自动触发生产环境部署
+```
+
+### 📋 开发环境要求
+- Podman 或 Docker
+- Git
+- (可选) .NET 8.0 SDK, Node.js 18+ (如需直接运行)
+
+### 📖 详细开发指南
+参考 [本地开发指南](./LOCAL-DEVELOPMENT.md) 了解完整的开发流程。
+
+### 🔧 手动安装方式
+
+#### 1. 克隆项目
+```bash
+git clone https://github.com/ocean5tech/trade-demo.git
 cd trade-demo
 ```
 
