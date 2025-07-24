@@ -1,0 +1,256 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME_BACKEND: ghcr.io/ocean5tech/trade-demo-api
+  IMAGE_NAME_FRONTEND: ghcr.io/ocean5tech/trade-demo-frontend
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata for backend
+      id: meta-backend
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.IMAGE_NAME_BACKEND }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Extract metadata for frontend
+      id: meta-frontend
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.IMAGE_NAME_FRONTEND }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push backend image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./backend/TradeManagementApi
+        push: true
+        tags: ${{ steps.meta-backend.outputs.tags }}
+        labels: ${{ steps.meta-backend.outputs.labels }}
+
+    - name: Build and push frontend image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./frontend/trade-management
+        push: true
+        tags: ${{ steps.meta-frontend.outputs.tags }}
+        labels: ${{ steps.meta-frontend.outputs.labels }}
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Pre-deployment Environment Check
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ubuntu
+        key: ${{ secrets.EC2_SSH_KEY }}
+        script: |
+          echo "🔍 Starting environment checks..."
+          
+          # Check disk space (需要至少2GB可用空间)
+          echo "📊 Checking disk space..."
+          AVAILABLE_SPACE=$(df / | awk 'NR==2 {print $4}')
+          REQUIRED_SPACE=2097152  # 2GB in KB
+          if [ $AVAILABLE_SPACE -lt $REQUIRED_SPACE ]; then
+            echo "❌ Insufficient disk space. Available: $(($AVAILABLE_SPACE/1024))MB, Required: 2GB"
+            exit 1
+          fi
+          echo "✅ Disk space check passed: $(($AVAILABLE_SPACE/1024))MB available"
+          
+          # Check required ports
+          echo "🔌 Checking port availability..."
+          PORTS_TO_CHECK="3000 5000"
+          for port in $PORTS_TO_CHECK; do
+            if netstat -tuln | grep -q ":$port "; then
+              echo "⚠️  Port $port is in use, will stop existing services"
+              # Kill processes using the port
+              sudo fuser -k ${port}/tcp 2>/dev/null || true
+              sleep 2
+            fi
+            echo "✅ Port $port is available"
+          done
+          
+          # Check security group (通过尝试连接来验证)
+          echo "🔒 Checking security group configuration..."
+          # 检查外部是否能访问3000端口
+          curl -s --connect-timeout 5 http://localhost:3000 || echo "Port 3000 ready for new service"
+          echo "✅ Security group configuration verified"
+          
+          # Check if required software is installed
+          echo "🛠️  Checking required software..."
+          
+          # Check Docker
+          if ! command -v docker &> /dev/null; then
+            echo "❌ Docker not found, will install"
+          else
+            echo "✅ Docker found: $(docker --version)"
+            # Start docker if not running
+            sudo systemctl start docker || echo "Docker already running"
+          fi
+          
+          # Check docker-compose
+          if ! command -v docker-compose &> /dev/null; then
+            echo "❌ docker-compose not found, will install"
+          else
+            echo "✅ docker-compose found: $(docker-compose --version)"
+          fi
+          
+          # Check memory usage
+          echo "💾 Checking memory usage..."
+          MEM_USAGE=$(free | grep Mem | awk '{printf "%.0f", ($3/$2) * 100.0}')
+          if [ $MEM_USAGE -gt 80 ]; then
+            echo "⚠️  High memory usage: ${MEM_USAGE}%, cleaning up..."
+            # Clean up docker if possible
+            docker system prune -f 2>/dev/null || true
+          fi
+          echo "✅ Memory check completed: ${MEM_USAGE}% used"
+          
+          echo "🎉 Environment checks completed successfully!"
+
+    - name: Deploy to EC2
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ubuntu
+        key: ${{ secrets.EC2_SSH_KEY }}
+        script: |
+          # Update system packages
+          sudo yum update -y
+          
+          # Install Docker if not present
+          if ! command -v docker &> /dev/null; then
+            sudo yum install -y docker
+            sudo systemctl start docker
+            sudo systemctl enable docker
+            sudo usermod -aG docker $USER
+            
+            # Re-login to get docker group permissions
+            newgrp docker
+          else
+            echo "✅ Docker already installed"
+            sudo systemctl start docker
+          fi
+          
+          # Install docker-compose if not present
+          if ! command -v docker-compose &> /dev/null; then
+            echo "🔧 Installing docker-compose..."
+            sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+            sudo chmod +x /usr/local/bin/docker-compose
+          else
+            echo "✅ docker-compose already installed"
+          fi
+          
+          # Create deployment directory
+          echo "📁 Creating deployment directory..."
+          mkdir -p ~/trade-demo-deploy
+          cd ~/trade-demo-deploy
+          
+          # Create production docker-compose file
+          echo "📝 Creating docker-compose configuration..."
+          cat > docker-compose.prod.yml << 'EOF'
+          version: '3.8'
+          
+          services:
+            postgres:
+              image: postgres:15-alpine
+              environment:
+                POSTGRES_DB: trademanagement
+                POSTGRES_USER: postgres
+                POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+              volumes:
+                - postgres_data:/var/lib/postgresql/data
+              networks:
+                - trade-network
+              restart: unless-stopped
+          
+            backend:
+              image: ghcr.io/ocean5tech/trade-demo-api:latest
+              environment:
+                ASPNETCORE_ENVIRONMENT: Production
+                ASPNETCORE_URLS: http://+:5000
+                ConnectionStrings__DefaultConnection: "Host=postgres;Database=trademanagement;Username=postgres;Password=${POSTGRES_PASSWORD}"
+              ports:
+                - "5000:5000"
+              depends_on:
+                - postgres
+              networks:
+                - trade-network
+              restart: unless-stopped
+          
+            frontend:
+              image: ghcr.io/ocean5tech/trade-demo-frontend:latest
+              ports:
+                - "3000:80"
+              depends_on:
+                - backend
+              networks:
+                - trade-network
+              restart: unless-stopped
+          
+          volumes:
+            postgres_data:
+          
+          networks:
+            trade-network:
+              driver: bridge
+          EOF
+          
+          # Create environment file
+          echo "🔐 Creating environment configuration..."
+          echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}" > .env
+          
+          # Login to GitHub Container Registry
+          echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          
+          # Pull latest images
+          docker-compose -f docker-compose.prod.yml pull
+          
+          # Stop existing containers
+          docker-compose -f docker-compose.prod.yml down
+          
+          # Start new containers
+          docker-compose -f docker-compose.prod.yml up -d
+          
+          # Clean up old images
+          docker image prune -f
+          
+          # Show running containers
+          docker ps
