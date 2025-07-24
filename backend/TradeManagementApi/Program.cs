@@ -94,7 +94,12 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowReactApp", policy =>
     {
-        policy.WithOrigins("http://localhost:3000", "http://localhost:3001")
+        policy.WithOrigins(
+                "http://localhost:3000", 
+                "http://localhost:3001",
+                "http://18.183.240.121:3000",  // 生产环境前端
+                "https://18.183.240.121:3000"  // HTTPS 支持
+              )
               .AllowAnyHeader()
               .AllowAnyMethod();
     });
@@ -151,10 +156,10 @@ app.UseAuthorization();
 app.MapControllers();
 
 Console.WriteLine("🚀 Trade Management API启动中...");
-Console.WriteLine("📡 API地址: http://localhost:5002");
+Console.WriteLine("📡 API地址: http://0.0.0.0:5000");
 Console.WriteLine("🗄️ 数据库: PostgreSQL with Entity Framework");
 Console.WriteLine("🔐 认证: JWT Token + ASP.NET Identity");
-Console.WriteLine("📚 Swagger文档: http://localhost:5002/swagger");
+Console.WriteLine("📚 Swagger文档: http://localhost:5000/swagger");
 Console.WriteLine("👤 默认管理员: admin@trademanagement.com / Admin123!");
 
 app.Run();

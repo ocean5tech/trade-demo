@@ -20,7 +20,10 @@ interface ComplianceAlert {
   documentId?: number;
 }
 
-const API_BASE_URL = 'http://localhost:5002/api';
+// 动态配置 API URL - 生产环境使用相对路径通过 nginx 代理
+const API_BASE_URL = process.env.NODE_ENV === 'production' 
+  ? '/api'  // 生产环境使用 nginx 代理
+  : 'http://localhost:5000/api';  // 本地开发
 
 const App: React.FC = () => {
   const [documents, setDocuments] = useState<TradeDocument[]>([]);
@@ -334,7 +337,7 @@ const App: React.FC = () => {
 
       <footer className="app-footer">
         <p>🚀 全栈演示: React + TypeScript ↔ .NET Core Web API</p>
-        <p>💻 前端: http://localhost:3000 | 后端: http://localhost:5002</p>
+        <p>💻 前端: http://18.183.240.121:3000 | 后端: http://18.183.240.121:5000</p>
         <p>🔧 开发环境: WSL + VSCode + Podman</p>
       </footer>
     </div>
