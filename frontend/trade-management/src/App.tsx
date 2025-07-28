@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './App.css';
+import { SearchFilter } from './components/SearchFilter';
 
 // 类型定义
 interface TradeDocument {
@@ -18,6 +19,20 @@ interface ComplianceAlert {
   type: 'warning' | 'error' | 'info';
   message: string;
   documentId?: number;
+}
+
+interface FilterOptions {
+  searchTerm: string;
+  status: string[];
+  riskLevel: string[];
+  dateRange: {
+    from: string;
+    to: string;
+  };
+  valueRange: {
+    min: number;
+    max: number;
+  };
 }
 
 // 动态配置 API URL - 生产环境使用相对路径通过 nginx 代理
@@ -41,6 +56,8 @@ const App: React.FC = () => {
     value: 0,
     riskLevel: 'Low'
   });
+  const [filteredDocuments, setFilteredDocuments] = useState<TradeDocument[]>([]);
+  const [filters, setFilters] = useState<FilterOptions | null>(null);
 
   // 数据获取逻辑
   useEffect(() => {
@@ -125,6 +142,57 @@ const App: React.FC = () => {
 
     fetchData();
   }, []);
+
+  // 过滤逻辑
+  useEffect(() => {
+    if (!filters) {
+      setFilteredDocuments(documents);
+      return;
+    }
+
+    let filtered = documents.filter(doc => {
+      // 搜索词过滤
+      if (filters.searchTerm) {
+        const searchTerm = filters.searchTerm.toLowerCase();
+        const matchesSearch = 
+          doc.documentType.toLowerCase().includes(searchTerm) ||
+          doc.companyName.toLowerCase().includes(searchTerm) ||
+          doc.country.toLowerCase().includes(searchTerm);
+        
+        if (!matchesSearch) return false;
+      }
+
+      // 状态过滤
+      if (filters.status.length > 0 && !filters.status.includes(doc.status)) {
+        return false;
+      }
+
+      // 风险等级过滤
+      if (filters.riskLevel.length > 0 && !filters.riskLevel.includes(doc.riskLevel)) {
+        return false;
+      }
+
+      // 日期范围过滤
+      if (filters.dateRange.from || filters.dateRange.to) {
+        const docDate = new Date(doc.createdDate);
+        if (filters.dateRange.from && docDate < new Date(filters.dateRange.from)) {
+          return false;
+        }
+        if (filters.dateRange.to && docDate > new Date(filters.dateRange.to)) {
+          return false;
+        }
+      }
+
+      // 价值范围过滤
+      if (doc.value < filters.valueRange.min || doc.value > filters.valueRange.max) {
+        return false;
+      }
+
+      return true;
+    });
+
+    setFilteredDocuments(filtered);
+  }, [documents, filters]);
 
   // CRUD 操作函数
   const createDocument = async (newDocument: Partial<TradeDocument>) => {
@@ -403,6 +471,12 @@ const App: React.FC = () => {
               </button>
             </div>
 
+            <SearchFilter
+              onFiltersChange={setFilters}
+              totalCount={documents.length}
+              filteredCount={filteredDocuments.length}
+            />
+
             {showCreateForm && (
               <div className="modal-overlay">
                 <div className="modal">
@@ -508,7 +582,7 @@ const App: React.FC = () => {
             )}
 
             <div className="documents-grid">
-              {documents.map(doc => (
+              {filteredDocuments.map(doc => (
                 <div key={doc.id} className={`document-card status-${doc.status.toLowerCase()}`}>
                   <div className="document-header">
                     <h3>{getStatusIcon(doc.status)} {doc.documentType}</h3>
